@@ -53,6 +53,8 @@ uniform float uAngle;
 uniform float uDistance;
 uniform float uVelocitySphere;
 uniform sampler2D uTexture;
+uniform vec4 balls[3];
+const int NUM_BALLS = 3;
 
 varying vec2 vUv;
 
@@ -106,26 +108,37 @@ float smin(float a,float b,float k)
 float movingSphere(vec3 p,float shape){
     float rad=uAngle*PI;
     vec3 pos=vec3(cos(rad),sin(rad),0.)*uDistance;
-    vec3 displacement=pos*fract(uTime*uVelocitySphere);
+    vec3 displacement=pos*fract(uTime*uVelocitySphere*0.1);
     float gotoCenter=sdSphere(p+displacement,.1);
     return smin(shape,gotoCenter,.3);
 }
 
 float sdf(vec3 p){
     //vec3 p1=rotate(p,vec3(1.),uTime*uVelocityBox);
-    float box=sdSphere(p-vec3(0.,sin(uTime*0.1),0.),.3);
-    float sphere=sdSphere(p,.3);
-    float sBox=smin(box,sphere,.3);
-    float mixedBox=mix(sBox,box,uProgress);
-    mixedBox=movingSphere(p,mixedBox);
-    float aspect=uResolution.x/uResolution.y;
-    vec2 mousePos=uMouse;
-    mousePos.x*=aspect;
-    float mouseSphere=sdSphere(p-vec3(mousePos,0.),.15);
-    float mixedBox2 = smin(mixedBox,mouseSphere,.1);
+    // float box=sdSphere(p-vec3(0.,sin(uTime*0.1),0.),.3);
+    // float sphere=sdSphere(p,.3);
+    // float sBox=smin(box,sphere,.3);
+    // float mixedBox=mix(sBox,box,uProgress);
+    // mixedBox=movingSphere(p,mixedBox);
+    // float aspect=uResolution.x/uResolution.y;
+    // vec2 mousePos=uMouse;
+    // mousePos.x*=aspect;
+    // float mouseSphere=sdSphere(p-vec3(mousePos,0.),.15);
+    // float mixedBox2 = smin(mixedBox,mouseSphere,.1);
 
-    float sphere3=sdSphere(p-vec3(0.5,0.5+cos(uTime*0.1),0.),.05);
-    return smin(mixedBox2, sphere3, .1);
+    // float sphere3=sdSphere(p-vec3(0.5,0.5+cos(uTime*0.1),0.),.05);
+    // return smin(mixedBox2, sphere3, .1);
+    float box=sdSphere(p, balls[0].w);
+    float sphere=sdSphere(p-balls[1].xyz, balls[1].w);
+    float sBox=smin(box,sphere,.3);
+    float mixedBox=mix(sBox, box, uProgress);
+    mixedBox=movingSphere(p,mixedBox);
+    // for(int i = 2; i < NUM_BALLS; i++) {
+    //     vec4 mb = balls[i];
+    //     sphere = sdSphere(p-mb.xyz, mb.w);
+    //     mixedBox = smin(mixedBox, sphere, .1);
+    // }
+    return mixedBox;
 }
 
 // http://jamie-wong.com/2016/07/15/ray-marching-signed-distance-functions/
@@ -502,6 +515,25 @@ class RayMarching extends Base {
     createRayMarchingMaterial() {
         const loader = new THREE.TextureLoader();
         const texture = loader.load(matcapTextureUrl);
+
+        var ballsData = [
+            {x: 1, y: 1, z: 1, r: 0.01},
+            {x: 0.3, y: -0.3, z: 1, r: 0.01},
+            {x: -0.3, y: 0.3, z: 1, r: 0.05}
+        ] 
+        var count = ballsData.length;
+        var dataToSendToGPU = new Float32Array(4 * count);
+        for (var i = 0; i < count; i++) {
+            var baseIndex = 4 * i;
+            var mb = ballsData[i];
+
+            dataToSendToGPU[baseIndex + 0] = mb.x;
+            dataToSendToGPU[baseIndex + 1] = mb.y;
+            dataToSendToGPU[baseIndex + 2] = mb.z;
+            dataToSendToGPU[baseIndex + 3] = mb.r;// * animationProperties.radiusMultiplier;
+            //dataToSendToGPU[baseIndex + 2] = mb.targRadius * animationProperties.radiusMultiplier;
+        }
+
         const rayMarchingMaterial = new THREE.ShaderMaterial({
             vertexShader: rayMarchingVertexShader,
             fragmentShader: rayMarchingFragmentShader,
@@ -533,6 +565,9 @@ class RayMarching extends Base {
                 },
                 uDistance: {
                     value: 1.2
+                },
+                balls: {
+                    value: dataToSendToGPU
                 }
             }
         });
@@ -548,6 +583,36 @@ class RayMarching extends Base {
             material
         });
     }
+
+    getBallData(elapsedTime){
+        var ballsData = [
+            {x: 1, y: 1, z: 1, r: 0.3},
+            {x: 0.3, y: -0.5, z: 0.3, r: 0.3},
+            {x: -0.3, y: 0.3, z: 0.3, r: 0.05}
+        ] 
+
+        for(let i = 0; i < ballsData.length; i++){
+            let ball = ballsData[i];
+            if(i == 1){
+                ball.y += Math.sin(elapsedTime* 0.1);
+            }
+        }
+
+        var count = ballsData.length;
+        var dataToSendToGPU = new Float32Array(4 * count);
+        for (var i = 0; i < count; i++) {
+            var baseIndex = 4 * i;
+            var mb = ballsData[i];
+
+            dataToSendToGPU[baseIndex + 0] = mb.x;
+            dataToSendToGPU[baseIndex + 1] = mb.y;
+            dataToSendToGPU[baseIndex + 2] = mb.z;
+            dataToSendToGPU[baseIndex + 3] = mb.r;
+        }
+
+        return dataToSendToGPU;
+    }
+
     // 动画
     update() {
         const elapsedTime = this.clock.getElapsedTime();
@@ -555,6 +620,7 @@ class RayMarching extends Base {
         if (this.rayMarchingMaterial) {
             this.rayMarchingMaterial.uniforms.uTime.value = elapsedTime;
             this.rayMarchingMaterial.uniforms.uMouse.value = mousePos;
+            this.rayMarchingMaterial.uniforms.balls.value = this.getBallData(elapsedTime);
         }
     }
     // 创建调试面板

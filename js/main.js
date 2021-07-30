@@ -53,8 +53,8 @@ uniform float uAngle;
 uniform float uDistance;
 uniform float uVelocitySphere;
 uniform sampler2D uTexture;
-uniform vec4 balls[3];
-const int NUM_BALLS = 3;
+uniform vec4 balls[7];
+const int NUM_BALLS = 7;
 
 varying vec2 vUv;
 
@@ -108,13 +108,12 @@ float smin(float a,float b,float k)
 float movingSphere(vec3 p,float shape){
     float rad=uAngle*PI;
     vec3 pos=vec3(cos(rad),sin(rad),0.)*uDistance;
-    vec3 displacement=pos*fract(uTime*uVelocitySphere*0.1);
-    float gotoCenter=sdSphere(p+displacement,.1);
+    vec3 displacement=pos*fract(uTime*uVelocitySphere*0.3);
+    float gotoCenter=sdSphere(p+sin(displacement)*0.2,.1);
     return smin(shape,gotoCenter,.3);
 }
 
 float sdf(vec3 p){
-    //vec3 p1=rotate(p,vec3(1.),uTime*uVelocityBox);
     // float box=sdSphere(p-vec3(0.,sin(uTime*0.1),0.),.3);
     // float sphere=sdSphere(p,.3);
     // float sBox=smin(box,sphere,.3);
@@ -128,16 +127,18 @@ float sdf(vec3 p){
 
     // float sphere3=sdSphere(p-vec3(0.5,0.5+cos(uTime*0.1),0.),.05);
     // return smin(mixedBox2, sphere3, .1);
-    float box=sdSphere(p, balls[0].w);
-    float sphere=sdSphere(p-balls[1].xyz, balls[1].w);
+    // vec3 p1=rotate(p,vec3(1.),uTime*uVelocityBox);
+    float box=sdSphere(p-vec3(cos(uTime*0.2)*0.1,sin(uTime*0.1)*0.1,0.),.3);
+    p=rotate(p,vec3(0,0,1.),uTime*uVelocityBox);
+    float sphere=sdSphere(p, balls[1].w);
     float sBox=smin(box,sphere,.3);
     float mixedBox=mix(sBox, box, uProgress);
-    mixedBox=movingSphere(p,mixedBox);
-    // for(int i = 2; i < NUM_BALLS; i++) {
-    //     vec4 mb = balls[i];
-    //     sphere = sdSphere(p-mb.xyz, mb.w);
-    //     mixedBox = smin(mixedBox, sphere, .1);
-    // }
+    // mixedBox=movingSphere(p,mixedBox);
+    for(int i = 2; i < NUM_BALLS; i++) {
+        vec4 mb = balls[i];
+        sphere = sdSphere(p-mb.xyz, mb.w);
+        mixedBox = smin(mixedBox, sphere, .1);
+    }
     return mixedBox;
 }
 
@@ -189,7 +190,7 @@ float fresnel(float bias,float scale,float power,vec3 I,vec3 N)
 void main(){
     vec2 cUv=centerUv(vUv);
     vec3 eye=vec3(0.,0.,2.5);
-    vec3 ray=normalize(vec3(cUv,-eye.z));
+    vec3 ray=normalize(vec3(cUv,-eye.z));   
     vec3 bg=background(vUv);
     vec3 color=bg;
     float end=5.;
@@ -199,6 +200,12 @@ void main(){
         vec3 pos=eye+depth*ray;
         vec3 normal=calcNormal(pos);
         vec2 matcapUv=matcap(ray,normal);
+
+        //自身旋转
+        matcapUv -= vec2(0.5,0.5);
+        matcapUv = vec2(matcapUv.x * cos(uTime*0.1) - matcapUv.y * sin(uTime*0.1), matcapUv.x*sin(uTime*0.1)+matcapUv.y*cos(uTime*0.1));
+        matcapUv += vec2(0.5,0.5);
+        
         color=texture2D(uTexture,matcapUv).rgb;
         float F=fresnel(0.,.4,3.2,ray,normal);
         color=mix(color,bg,F);
@@ -393,15 +400,23 @@ class Base{
 
     // 追踪鼠标位置
     trackMousePos() {
-        window.addEventListener("mousemove", (e) => {
+        // window.addEventListener("mousemove", (e) => {
+        //     this.setMousePos(e);
+        // });
+        // window.addEventListener("touchstart", (e) => {
+        //     this.setMousePos(e.touches[0]);
+        // }, { passive: false });
+        // window.addEventListener("touchmove", (e) => {
+        //     this.setMousePos(e.touches[0]);
+        // });
+        window.addEventListener("pointerdown", (e) => {
+            // this.setMousePos(e.touches[0]);
             this.setMousePos(e);
+            this.addMouseBall(e);
         });
-        window.addEventListener("touchstart", (e) => {
-            this.setMousePos(e.touches[0]);
-        }, { passive: false });
-        window.addEventListener("touchmove", (e) => {
-            this.setMousePos(e.touches[0]);
-        });
+        // window.addEventListener("pointerup", (e) => {
+        //     this.setMousePos(e.touches[0]);
+        // });
     }
     // 设置鼠标位置
     setMousePos(e) {
@@ -506,6 +521,7 @@ class RayMarching extends Base {
         this.createPlane();
         this.createLight();
         this.trackMousePos();
+        this.createOrbitControls();
         this.addListeners();
         // this.createDebugPanel();
         this.setLoop();
@@ -518,8 +534,7 @@ class RayMarching extends Base {
 
         var ballsData = [
             {x: 1, y: 1, z: 1, r: 0.01},
-            {x: 0.3, y: -0.3, z: 1, r: 0.01},
-            {x: -0.3, y: 0.3, z: 1, r: 0.05}
+            {x: 0.3, y: -0.3, z: 1, r: 0.01}
         ] 
         var count = ballsData.length;
         var dataToSendToGPU = new Float32Array(4 * count);
@@ -573,6 +588,16 @@ class RayMarching extends Base {
         });
         this.rayMarchingMaterial = rayMarchingMaterial;
         this.shaderMaterial = rayMarchingMaterial;
+
+        this.ballsData = [
+            {x: 0, y: 0, z: 0, r: 0.2},
+            {x: 0.7, y: -0.5, z: 0.5, r: 0.01},
+            {x: -0.3, y: 0.3, z: 0, r: 0.1},
+            {x: -0.3, y: 0.3, z: 0, r: 0.05},
+            {x: -0.3, y: 0.3, z: 0.1, r: 0.1},
+            {x: 0.3, y: 0.5, z: 0.2, r: 0.05}
+        ] 
+        // this.addMouseBall();
     }
     // 创建平面
     createPlane() {
@@ -584,25 +609,64 @@ class RayMarching extends Base {
         });
     }
 
-    getBallData(elapsedTime){
-        var ballsData = [
-            {x: 1, y: 1, z: 1, r: 0.3},
-            {x: 0.3, y: -0.5, z: 0.3, r: 0.3},
-            {x: -0.3, y: 0.3, z: 0.3, r: 0.05}
-        ] 
+    addMouseBall(e){
+        if(this.ballsData.length>=7) return;
+        // let ballData = {x: this.mousePos.x, y: this.mousePos.y, z: 0.3, r: 0.08, temp:true};
+        let ballData = {x: Math.random()*0.05, y: Math.random()*0.05, z: 0.3, r: 0.08, temp:true};
+        this.ballsData.push(ballData);
 
-        for(let i = 0; i < ballsData.length; i++){
-            let ball = ballsData[i];
-            if(i == 1){
-                ball.y += Math.sin(elapsedTime* 0.1);
+        setTimeout(()=>{
+            this.ballsData.pop();
+        }, 2000)
+    }
+
+    getBallData(elapsedTime){
+        // this.ballsData = [
+        //     {x: 0, y: 0, z: 0, r: 0.2},
+        //     {x: 0.7, y: -0.5, z: 0.5, r: 0.01},
+        //     {x: -0.3, y: 0.3, z: 0, r: 0.1},
+        //     {x: -0.3, y: 0.3, z: 0, r: 0.05},
+        //     {x: -0.3, y: 0.3, z: 0.1, r: 0.1},
+        //     {x: 0.3, y: 0.5, z: 0.2, r: 0.05}
+        // ] 
+
+        for(let i = 0; i < this.ballsData.length; i++){
+            let ball = this.ballsData[i];
+            switch(i){
+                case 0:
+                    // ball.y = Math.sin(elapsedTime * 0.5)*0.5;
+                    break;
+                case 2:
+                    ball.x = this.ballsData[0].x + Math.sin(elapsedTime* 0.7)*0.2*Math.cos(elapsedTime);
+                    ball.y = this.ballsData[0].y + Math.cos(elapsedTime* 0.6)*0.2;
+                    // ball.x = Math.sin(elapsedTime * 0.7)*0.5 * Math.cos(elapsedTime);
+                    // ball.y = Math.cos(elapsedTime * 0.7)*0.5;
+                    break;
+                case 3:
+                    ball.x = this.ballsData[0].x - Math.sin(elapsedTime* 0.5)*0.2;
+                    ball.y = this.ballsData[0].y - Math.cos(elapsedTime* 0.4)*0.15*Math.cos(elapsedTime*0.5);
+                    // ball.x = Math.sin(elapsedTime * 0.7)*0.5 * Math.cos(elapsedTime);
+                    // ball.y = Math.cos(elapsedTime * 0.7)*0.5;
+                    break;
+                case 4:
+                    ball.x = Math.sin(elapsedTime*0.06)*0.8*Math.cos(elapsedTime*0.05);
+                    ball.y = Math.sin(elapsedTime*0.07)*0.85*Math.sin(elapsedTime*0.01);
+                    break;
+                case 5:
+                    ball.x = -1*Math.cos(elapsedTime*0.05)*0.5*Math.sin(elapsedTime*0.08);
+                    ball.y = -1*Math.sin(elapsedTime*0.05-Math.PI)*0.6;
+                    break;
+            }
+            if(ball.temp){
+                ball.z -= Math.abs(Math.sin(elapsedTime*1.05)*0.003);
             }
         }
 
-        var count = ballsData.length;
+        var count = this.ballsData.length;
         var dataToSendToGPU = new Float32Array(4 * count);
         for (var i = 0; i < count; i++) {
             var baseIndex = 4 * i;
-            var mb = ballsData[i];
+            var mb = this.ballsData[i];
 
             dataToSendToGPU[baseIndex + 0] = mb.x;
             dataToSendToGPU[baseIndex + 1] = mb.y;
